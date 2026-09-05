@@ -1,0 +1,18 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: room-ai-api
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    volumes:
+      - service-storage:/app/service/storage
+      - annotated-images:/app/Annotated
+    restart: unless-stopped
+
+volumes:
+  service-storage:
+  annotated-images:

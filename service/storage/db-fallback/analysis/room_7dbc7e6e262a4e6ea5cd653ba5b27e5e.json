@@ -1,0 +1,190 @@
+{
+  "analysisId": "c0ff7509fda041a1998bea7f5dd02cd8",
+  "roomId": "room_7dbc7e6e262a4e6ea5cd653ba5b27e5e",
+  "roomName": "Bedroom",
+  "status": "completed",
+  "photosAnalyzed": 1,
+  "issuesFound": 5,
+  "originalImageUrls": [
+    "/media/rooms/room_7dbc7e6e262a4e6ea5cd653ba5b27e5e/c0ff7509fda041a1998bea7f5dd02cd8/originals/photo-1.jpg"
+  ],
+  "annotatedImageUrl": "/Annotated/room_7dbc7e6e262a4e6ea5cd653ba5b27e5e_c0ff7509fda041a1998bea7f5dd02cd8_photo-1.jpg",
+  "annotatedImages": [
+    "/Annotated/room_7dbc7e6e262a4e6ea5cd653ba5b27e5e_c0ff7509fda041a1998bea7f5dd02cd8_photo-1.jpg"
+  ],
+  "severitySummary": {
+    "critical": 0,
+    "high": 2,
+    "medium": 2,
+    "low": 1,
+    "safe": 0
+  },
+  "overallRisk": {
+    "score": 72,
+    "level": "High Risk",
+    "breakdown": {
+      "high": 2,
+      "medium": 2,
+      "low": 1,
+      "safe": 0
+    }
+  },
+  "aiInsightSummary": [
+    "Extensive plaster and paint failure on ceiling and walls with fallen debris on floor.",
+    "Ceiling and upper walls show signs consistent with long-term water damage and risk of further collapse.",
+    "Window frames and surrounding plaster are degraded but window glass appears intact.",
+    "Floor is covered with heavy debris creating trip hazards and possible structural floor damage.",
+    "Electrical outlets appear present; no exposed live wiring visible but surrounding wall damage is significant."
+  ],
+  "recommendedActions": [
+    {
+      "issueType": "Ceiling collapse / water damage",
+      "riskLevel": "High Risk",
+      "description": "Large areas of plaster detachment and staining on ceiling; loose debris on floor indicates previous collapse.",
+      "action": "Evacuate room until a structural contractor inspects. Remove loose plaster, locate and repair leak source, and repair/replace ceiling framing and finish."
+    },
+    {
+      "issueType": "Floor debris and structural damage",
+      "riskLevel": "High Risk",
+      "description": "Heavy fallen plaster and rubble covering floor creating trip hazards and possible subfloor damage.",
+      "action": "Clear debris with PPE, assess flooring/subfloor for damage, repair or reinforce subfloor as needed before reusing room."
+    },
+    {
+      "issueType": "Walls - peeling paint & plaster loss, mold risk",
+      "riskLevel": "Medium Risk",
+      "description": "Extensive paint and plaster delamination; potential moisture intrusion and mold growth in affected areas.",
+      "action": "Test for moisture and mold. Remove damaged plaster, dry and remediate mold if present, then replaster and repaint with moisture-resistant materials."
+    },
+    {
+      "issueType": "Window frame / surround deterioration",
+      "riskLevel": "Medium Risk",
+      "description": "Window surrounds and frame show degraded plaster and seal failure; could allow water and air infiltration.",
+      "action": "Inspect window seals and frames. Repair/replace damaged frame components and reseal to restore weatherproofing."
+    },
+    {
+      "issueType": "Electrical outlet condition near damaged wall",
+      "riskLevel": "Low Risk",
+      "description": "Outlet(s) visible but located within significantly damaged wall area; no exposed live wiring noted.",
+      "action": "Have a licensed electrician inspect outlets and wiring after wall repairs. Replace any outlets or covers compromised by moisture or impact."
+    }
+  ],
+  "detectedIssues": [
+    {
+      "id": "issue_001",
+      "photoIndex": 0,
+      "area": "Ceiling",
+      "issueType": "Ceiling plaster failure / water damage",
+      "riskLevel": "High Risk",
+      "confidence": 94,
+      "description": "Extensive peeling, staining and detached plaster on ceiling; evidence of previous collapse and active deterioration.",
+      "recommendation": "Immediate structural assessment. Remove loose material, identify/repair moisture source, and repair ceiling framing and finishes.",
+      "bbox": {
+        "x": 60,
+        "y": 0,
+        "width": 500,
+        "height": 90
+      }
+    },
+    {
+      "id": "issue_002",
+      "photoIndex": 0,
+      "area": "Floor",
+      "issueType": "Debris / fallen plaster - trip hazard",
+      "riskLevel": "High Risk",
+      "confidence": 96,
+      "description": "Large amount of plaster and rubble on floor from ceiling/wall failure; major trip hazard and possible subfloor impact.",
+      "recommendation": "Do not occupy room until debris is cleared. Remove rubble wearing PPE, inspect and repair flooring/subfloor as needed.",
+      "bbox": {
+        "x": 90,
+        "y": 190,
+        "width": 440,
+        "height": 100
+      }
+    },
+    {
+      "id": "issue_003",
+      "photoIndex": 0,
+      "area": "Walls",
+      "issueType": "Peeling paint and plaster loss",
+      "riskLevel": "Medium Risk",
+      "confidence": 92,
+      "description": "Widespread paint peeling and plaster delamination on side walls; likely moisture-related and may harbor mold.",
+      "recommendation": "Assess moisture levels and check for mold. Remove damaged plaster, dry area, remediate mold if present, then replaster and repaint.",
+      "bbox": {
+        "x": 0,
+        "y": 40,
+        "width": 200,
+        "height": 220
+      }
+    },
+    {
+      "id": "issue_004",
+      "photoIndex": 0,
+      "area": "Windows",
+      "issueType": "Window surround deterioration / seal failure",
+      "riskLevel": "Medium Risk",
+      "confidence": 85,
+      "description": "Plaster and frame around window are degraded; seals likely compromised though glass appears intact.",
+      "recommendation": "Inspect window frame and seals. Repair or replace damaged frame components and reseal to prevent water ingress.",
+      "bbox": {
+        "x": 210,
+        "y": 35,
+        "width": 200,
+        "height": 100
+      }
+    },
+    {
+      "id": "issue_005",
+      "photoIndex": 0,
+      "area": "Electrical outlets",
+      "issueType": "Outlet adjacent to damaged wall",
+      "riskLevel": "Low Risk",
+      "confidence": 78,
+      "description": "Electrical outlet visible on left wall surrounded by damaged plaster; no exposed wiring or burn marks observed.",
+      "recommendation": "Have a licensed electrician inspect outlet and wiring after wall repairs; replace outlet or cover if moisture or damage present.",
+      "bbox": {
+        "x": 18,
+        "y": 120,
+        "width": 36,
+        "height": 36
+      }
+    }
+  ],
+  "areas": [
+    {
+      "name": "Ceiling",
+      "visible": true,
+      "status": "issue_found",
+      "confidence": 94,
+      "note": "Large plaster loss and staining; possible structural compromise."
+    },
+    {
+      "name": "Walls",
+      "visible": true,
+      "status": "issue_found",
+      "confidence": 92,
+      "note": "Widespread peeling and delamination; moisture and mold risk."
+    },
+    {
+      "name": "Windows",
+      "visible": true,
+      "status": "issue_found",
+      "confidence": 85,
+      "note": "Frame and surrounds degraded; resealing recommended."
+    },
+    {
+      "name": "Floor",
+      "visible": true,
+      "status": "issue_found",
+      "confidence": 96,
+      "note": "Heavy debris covering floor; trip hazard and possible subfloor damage."
+    },
+    {
+      "name": "Electrical outlets",
+      "visible": true,
+      "status": "checked",
+      "confidence": 78,
+      "note": "Outlets visible but surrounded by wall damage; electrician inspection advised."
+    }
+  ]
+}
