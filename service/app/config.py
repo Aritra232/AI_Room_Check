@@ -11,8 +11,10 @@ load_dotenv(ROOT_DIR / ".env")
 
 class Settings(BaseSettings):
     app_name: str = "Room AI Inspection Service"
-    openai_api_key: str
-    openai_model: str = "gpt-5.6-sol"
+    openai_api_key: str | None = None
+    openai_model: str | None = None
+    gemini_api_key: str
+    gemini_model: str = "gemini-3.7-flash"
     database_url: str
     database_name: str
     storage_dir: Path = ROOT_DIR / "service" / "storage"

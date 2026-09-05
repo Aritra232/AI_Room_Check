@@ -1,8 +1,9 @@
-import base64
+import asyncio
 import json
 from pathlib import Path
 
-from openai import AsyncOpenAI
+from google import genai
+from google.genai import types
 from PIL import Image
 
 from service.app.config import settings
@@ -14,16 +15,7 @@ ROOM_ANALYSIS_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
     "properties": {
-        "analysisId": {"type": "string"},
-        "userId": {"type": "string"},
-        "roomId": {"type": "string"},
         "roomName": {"type": "string"},
-        "status": {"type": "string", "enum": ["completed"]},
-        "photosAnalyzed": {"type": "integer"},
-        "issuesFound": {"type": "integer"},
-        "originalImageUrls": {"type": "array", "items": {"type": "string"}},
-        "annotatedImageUrl": {"type": ["string", "null"]},
-        "annotatedImages": {"type": "array", "items": {"type": "string"}},
         "severitySummary": {
             "type": "object",
             "additionalProperties": False,
@@ -104,7 +96,7 @@ ROOM_ANALYSIS_SCHEMA = {
                     "details": {"type": "string"},
                     "recommendation": {"type": "string"},
                     "bbox": {
-                        "type": ["object", "null"],
+                        "type": "object",
                         "additionalProperties": False,
                         "properties": {
                             "x": {"type": "integer"},
@@ -148,7 +140,6 @@ ROOM_ANALYSIS_SCHEMA = {
                     "description",
                     "details",
                     "recommendation",
-                    "bbox",
                     "annotations",
                 ],
             },
@@ -176,16 +167,7 @@ ROOM_ANALYSIS_SCHEMA = {
         },
     },
     "required": [
-        "analysisId",
-        "userId",
-        "roomId",
         "roomName",
-        "status",
-        "photosAnalyzed",
-        "issuesFound",
-        "originalImageUrls",
-        "annotatedImageUrl",
-        "annotatedImages",
         "severitySummary",
         "overallRisk",
         "aiInsightSummary",
@@ -202,32 +184,18 @@ async def analyze_room_photos(
     image_paths: list[Path],
     analysis_id: str,
 ) -> RoomAnalysis:
-    client = AsyncOpenAI(api_key=settings.openai_api_key)
-    content = [
-        {
-            "type": "input_text",
-            "text": build_room_analysis_prompt(user_id, room_id, len(image_paths), analysis_id),
-        }
-    ]
-    content.extend(_image_payloads(image_paths))
-
-    response = await client.responses.create(
-        model=settings.openai_model,
-        input=[{"role": "user", "content": content}],
-        text={
-            "format": {
-                "type": "json_schema",
-                "name": "room_inspection_analysis",
-                "schema": ROOM_ANALYSIS_SCHEMA,
-                "strict": True,
-            }
-        },
+    payload = await asyncio.to_thread(
+        _generate_gemini_analysis,
+        user_id,
+        room_id,
+        image_paths,
+        analysis_id,
     )
 
-    payload = json.loads(response.output_text)
     payload["analysisId"] = analysis_id
     payload["userId"] = user_id
     payload["roomId"] = room_id
+    payload["status"] = "completed"
     payload["photosAnalyzed"] = len(image_paths)
     payload["originalImageUrls"] = []
     payload["annotatedImageUrl"] = None
@@ -235,6 +203,51 @@ async def analyze_room_photos(
     _normalize_annotations(payload, image_paths)
     payload["issuesFound"] = len(payload.get("detectedIssues", []))
     return RoomAnalysis(**payload)
+
+
+def _generate_gemini_analysis(
+    user_id: str,
+    room_id: str,
+    image_paths: list[Path],
+    analysis_id: str,
+) -> dict:
+    client = genai.Client(api_key=settings.gemini_api_key)
+    contents = [
+        build_room_analysis_prompt(user_id, room_id, len(image_paths), analysis_id),
+        *_gemini_image_parts(image_paths),
+    ]
+
+    response = client.models.generate_content(
+        model=settings.gemini_model,
+        contents=contents,
+        config=types.GenerateContentConfig(
+            response_mime_type="application/json",
+            response_schema=_gemini_compatible_schema(ROOM_ANALYSIS_SCHEMA),
+        ),
+    )
+
+    return json.loads(response.text)
+
+
+def _gemini_compatible_schema(schema: dict) -> dict:
+    unsupported_keys = {"additionalProperties"}
+    converted = {}
+
+    for key, value in schema.items():
+        if key in unsupported_keys:
+            continue
+
+        if isinstance(value, dict):
+            converted[key] = _gemini_compatible_schema(value)
+        elif isinstance(value, list):
+            converted[key] = [
+                _gemini_compatible_schema(item) if isinstance(item, dict) else item
+                for item in value
+            ]
+        else:
+            converted[key] = value
+
+    return converted
 
 
 def _normalize_annotations(payload: dict, image_paths: list[Path]) -> None:
@@ -312,6 +325,13 @@ def _clamp_bbox(bbox: dict | None, image_width: int, image_height: int) -> dict 
     y = max(0, int(bbox.get("y", 0)))
     width = max(0, int(bbox.get("width", 0)))
     height = max(0, int(bbox.get("height", 0)))
+
+    if _looks_normalized_bbox(x, y, width, height, image_width, image_height):
+        x = round(x * image_width / 1000)
+        y = round(y * image_height / 1000)
+        width = round(width * image_width / 1000)
+        height = round(height * image_height / 1000)
+
     x2 = min(image_width, x + width)
     y2 = min(image_height, y + height)
     width = x2 - x
@@ -321,6 +341,20 @@ def _clamp_bbox(bbox: dict | None, image_width: int, image_height: int) -> dict 
         return None
 
     return {"x": x, "y": y, "width": width, "height": height}
+
+
+def _looks_normalized_bbox(
+    x: int,
+    y: int,
+    width: int,
+    height: int,
+    image_width: int,
+    image_height: int,
+) -> bool:
+    values = [x, y, width, height]
+    fits_normalized_range = all(0 <= value <= 1000 for value in values)
+    exceeds_image_bounds = x + width > image_width or y + height > image_height
+    return fits_normalized_range and exceeds_image_bounds
 
 
 def _is_oversized_bbox(bbox: dict, image_width: int, image_height: int, area: str) -> bool:
@@ -410,19 +444,11 @@ def _intersection_area(first: dict, second: dict) -> int:
     return (right - left) * (bottom - top)
 
 
-def _image_payloads(image_paths: list[Path]) -> list[dict[str, str]]:
+def _gemini_image_parts(image_paths: list[Path]) -> list[types.Part]:
     return [
-        {
-            "type": "input_image",
-            "image_url": f"data:{_mime_type(path)};base64,{_base64_image(path)}",
-            "detail": "high",
-        }
+        types.Part.from_bytes(data=path.read_bytes(), mime_type=_mime_type(path))
         for path in image_paths
     ]
-
-
-def _base64_image(path: Path) -> str:
-    return base64.b64encode(path.read_bytes()).decode("utf-8")
 
 
 def _mime_type(path: Path) -> str:

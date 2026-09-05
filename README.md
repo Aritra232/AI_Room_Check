@@ -8,7 +8,7 @@ FastAPI service for AI-powered room inspection.
 - Saves every analysis under `userId` and generated `roomId`.
 - Generates and stores the room id automatically.
 - Infers the room name/type from the photo when possible.
-- Uses OpenAI vision analysis to inspect:
+- Uses Gemini vision analysis to inspect:
   - Ceiling
   - Walls
   - Windows
@@ -18,8 +18,8 @@ FastAPI service for AI-powered room inspection.
 - Draws AI detections onto the uploaded photo and saves annotated JPG files in `Annotated/`.
 - Stores analysis results in MongoDB when available.
 
-The default vision model is `gpt-5.6-sol`. You can override it with `OPENAI_MODEL`
-in `.env` if your account uses a different model.
+The default vision model is `gemini-3.7-flash`. You can override it with
+`GEMINI_MODEL` in `.env` if your account uses a different model.
 
 ## Setup
 
