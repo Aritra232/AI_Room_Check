@@ -15,8 +15,8 @@ from service.app.schemas import (
     RoomAnalysisResponse,
 )
 from service.app.services.annotation import create_annotated_images
-from service.app.services.openai_room_analyzer import analyze_room_photos
-from service.app.services.storage import save_uploads
+from service.app.services.gemini_room_analyzer import analyze_room_photos
+from service.app.services.storage import delete_paths, save_uploads
 
 
 app = FastAPI(title=settings.app_name)
@@ -54,22 +54,24 @@ async def analyze_room(
     analysis_dir = settings.storage_dir / "users" / user_id / "rooms" / room_id / analysis_id
     original_paths = await save_uploads(photos, analysis_dir / "originals")
 
-    ai_result = await analyze_room_photos(user_id, room_id, original_paths, analysis_id)
-    annotated_paths = create_annotated_images(
-        original_paths=original_paths,
-        issues=ai_result.detectedIssues,
-        output_dir=settings.annotated_dir,
-        filename_prefix=f"{room_id}_{analysis_id}",
-    )
+    try:
+        ai_result = await analyze_room_photos(user_id, room_id, original_paths, analysis_id)
+        annotated_paths = create_annotated_images(
+            original_paths=original_paths,
+            issues=ai_result.detectedIssues,
+            output_dir=settings.annotated_dir,
+            filename_prefix=f"{room_id}_{analysis_id}",
+        )
+    finally:
+        delete_paths([analysis_dir])
 
-    original_urls = [_media_url(path) for path in original_paths]
     annotated_urls = [_annotated_url(path) for path in annotated_paths]
 
     analysis_data = ai_result.model_dump()
     analysis_data.update(
         {
             "userId": user_id,
-            "originalImageUrls": original_urls,
+            "originalImageUrls": [],
             "annotatedImageUrl": annotated_urls[0] if annotated_urls else None,
             "annotatedImages": annotated_urls,
         }
@@ -100,11 +102,6 @@ async def confirm_room_analysis(
 ) -> ConfirmAnalysisResponse:
     await save_room_confirmation(user_id, room_id, payload.model_dump())
     return ConfirmAnalysisResponse(userId=user_id, roomId=room_id, status="saved")
-
-
-def _media_url(path: Path) -> str:
-    relative = path.relative_to(settings.storage_dir).as_posix()
-    return f"/media/{relative}"
 
 
 def _annotated_url(path: Path) -> str:

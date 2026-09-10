@@ -4,7 +4,7 @@ FastAPI service for AI-powered room inspection.
 
 ## What it does
 
-- Accepts one or more room photos.
+- Accepts one or more room photos as temporary input.
 - Saves every analysis under `userId` and generated `roomId`.
 - Generates and stores the room id automatically.
 - Infers the room name/type from the photo when possible.
@@ -15,10 +15,12 @@ FastAPI service for AI-powered room inspection.
   - Floor
   - Electrical outlets
 - Returns structured JSON findings for the inspection summary screen.
-- Draws AI detections onto the uploaded photo and saves annotated JPG files in `Annotated/`.
+- Uses a dedicated Gemini damage-localization pass to draw only damaged patches onto the uploaded photo.
+- Saves annotated JPG files in `Annotated/`.
+- Deletes original uploaded photos after the annotated JPG is created.
 - Stores analysis results in MongoDB when available.
 
-The default vision model is `gemini-3.7-flash`. You can override it with
+The default vision model is `gemini-3.8-flash`. You can override it with
 `GEMINI_MODEL` in `.env` if your account uses a different model.
 
 ## Setup
@@ -71,3 +73,5 @@ curl.exe -X POST "http://127.0.0.1:8000/api/users/user_123/rooms/analyze" `
 The response includes `annotatedImageUrl` and `annotatedImages`, which point to JPG files served from `/Annotated/...`.
 It also includes `userId`, the generated `roomId`, and `reportPreview` data for the Overview, Finding, and Recommendation tabs.
 Raw bbox coordinates are used internally to create the annotated JPG, but they are not returned in the API response.
+Uploaded original photos are stored only temporarily during analysis and are deleted after
+the annotated JPG is created. `originalImageUrls` is returned as an empty list.

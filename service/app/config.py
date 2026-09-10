@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     openai_api_key: str | None = None
     openai_model: str | None = None
     gemini_api_key: str
-    gemini_model: str = "gemini-3.7-flash"
+    gemini_model: str = "gemini-3.8-flash"
     database_url: str
     database_name: str
     storage_dir: Path = ROOT_DIR / "service" / "storage"
