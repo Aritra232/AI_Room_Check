@@ -14,7 +14,7 @@ FastAPI service for AI-powered room inspection.
   - Windows
   - Floor
   - Electrical outlets
-- Returns structured JSON findings for the inspection summary screen.
+- Returns structured JSON findings, severity counts, severity percentages, and risk score data for the inspection summary screen.
 - Uses a dedicated Gemini damage-localization pass to draw only damaged patches onto the uploaded photo.
 - Saves annotated JPG files in `Annotated/`.
 - Deletes original uploaded photos after the annotated JPG is created.

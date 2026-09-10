@@ -78,10 +78,18 @@ class RecommendedAction(BaseModel):
     action: str
 
 
+class SeveritySummaryItem(BaseModel):
+    key: str
+    label: RiskLevel
+    count: int = Field(ge=0)
+    percentage: int = Field(ge=0, le=100)
+
+
 class OverallRisk(BaseModel):
     score: int = Field(ge=0, le=100)
     level: RiskLevel
     breakdown: dict[str, int]
+    breakdownPercentages: dict[str, int] = Field(default_factory=dict)
 
 
 class ReportOverview(BaseModel):
@@ -110,6 +118,7 @@ class RoomAnalysis(BaseModel):
     annotatedImageUrl: str | None
     annotatedImages: list[str]
     severitySummary: dict[str, int]
+    severityLevelSummary: list[SeveritySummaryItem] = Field(default_factory=list)
     overallRisk: OverallRisk
     aiInsightSummary: list[str]
     recommendedActions: list[RecommendedAction]
@@ -130,6 +139,7 @@ class RoomAnalysisResponse(BaseModel):
     annotatedImageUrl: str | None
     annotatedImages: list[str]
     severitySummary: dict[str, int]
+    severityLevelSummary: list[SeveritySummaryItem] = Field(default_factory=list)
     overallRisk: OverallRisk
     aiInsightSummary: list[str]
     recommendedActions: list[RecommendedAction]

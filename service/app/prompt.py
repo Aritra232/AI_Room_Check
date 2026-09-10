@@ -26,7 +26,8 @@ Inspect exactly these five categories:
 Report only visible property/building defects. Do not exaggerate severity or invent
 damage that is hidden behind furniture, debris, glare, shadows, or low image quality:
 - water intrusion, water stains, dampness, leaks
-- cracks, wall fissures, holes, peeling paint, broken plaster, missing plaster
+- cracks, wall fissures, holes, peeling paint, broken plaster, missing plaster,
+  missing drywall, exposed studs, exposed framing, exposed masonry/substrate
 - sagging, ceiling collapse, exposed lath/wood/substrate, structural stress
 - mold or mildew-like patches
 - broken window glass, damaged frame, damaged seal, moisture damage around frame
@@ -55,13 +56,15 @@ Annotation rules:
 - Annotation boxes are only for the final annotated JPG.
 - Return as many annotations as the image needs. Do not limit the count to 2, 3, or 5.
 - Each annotation must surround visible damaged building material, not the full object or room zone.
-- Correct examples: missing plaster patch, ceiling hole, exposed lath/wood, water stain,
-  cracked plaster line, damaged outlet, broken window frame section.
+- Correct examples: missing plaster patch, missing drywall section, exposed studs/framing,
+  ceiling hole, exposed lath/wood, water stain, cracked plaster line, damaged outlet,
+  broken window frame section.
 - Incorrect examples: whole wall, whole ceiling, whole floor, whole window, bed,
   blanket, furniture, clean wall area, clean ceiling area, window glass, door opening,
   shadow, light beam, rubble pile on top of floor.
-- For large connected damage, such as a collapsed ceiling section, use one practical box
-  around that connected damaged section. Do not make it tiny.
+- For large connected damage, such as a collapsed ceiling section or a wall section with
+  missing plaster/drywall and exposed framing, use one practical box around that connected
+  damaged section. Do not make it tiny, and do not skip it just because it is large.
 - For separated damage patches, use separated boxes.
 - Avoid heavy overlap. If two boxes would overlap heavily, use the one that better covers
   the damaged material.
@@ -78,13 +81,14 @@ Keep summaries short and direct.
 def build_damage_annotation_prompt(photo_count: int) -> str:
     return f"""
 You are a visual damage localization model for a property inspection app.
-Analyze {photo_count} uploaded room photo(s) and return JSON only.
+Analyze {photo_count} annotation view image(s) and return JSON only.
 
 Your only job is to locate visible damaged building material so the backend can draw
 red numbered boxes on the annotated JPG. Do not create a report here.
 
 Use box_2d as [ymin, xmin, ymax, xmax] normalized to a 0-1000 coordinate space.
 Each box must tightly surround the damaged patch itself.
+Set photoIndex to the annotation view index described in the message after this prompt.
 
 Allowed areas:
 1. Ceiling
@@ -96,8 +100,9 @@ Allowed areas:
 Mark these visible defects:
 - Ceiling: holes, collapse, missing plaster, exposed lath/wood/substrate, sagging,
   large cracks, water stains with clear damaged boundary, peeling/delaminated plaster.
-- Walls: cracks, fissures, missing plaster, broken plaster, peeling paint, damp/mold
-  patches with clear damage boundary.
+- Walls: cracks, fissures, holes, missing plaster, missing drywall, broken plaster,
+  exposed studs/framing, exposed masonry/substrate, peeling paint, damp/mold patches
+  with clear damage boundary.
 - Windows: broken glass, rotted/damaged frame, damaged sill, failed or visibly damaged
   seal/surround. Never box normal glass or the whole window.
 - Floor: actual floor cracks, holes, broken tiles, warped floor, water-damaged floor
@@ -111,6 +116,9 @@ Critical rules:
   surfaces.
 - If the ceiling has a broken hole, collapsed plaster, or exposed substrate, prioritize
   that ceiling damage over nearby windows or walls.
+- Do not miss obvious large damaged wall sections. If a wall has a clear connected area
+  of missing plaster/drywall or exposed framing, box that damaged section even if it is
+  larger than the other boxes.
 - For one connected damaged patch, return one practical tight box around that patch.
 - For separated patches, return separated boxes.
 - Avoid heavy overlap. If two boxes overlap heavily, keep the tighter one.

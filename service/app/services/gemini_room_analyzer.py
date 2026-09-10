@@ -1,4 +1,6 @@
 import asyncio
+from dataclasses import dataclass
+from io import BytesIO
 import json
 from pathlib import Path
 
@@ -13,6 +15,15 @@ from service.app.schemas import RoomAnalysis
 
 INSPECTION_AREAS = {"Ceiling", "Walls", "Windows", "Floor", "Electrical outlets"}
 RISK_LEVELS = {"Safe", "Low Risk", "Medium Risk", "High Risk", "Critical Risk"}
+
+
+@dataclass(frozen=True)
+class AnnotationView:
+    original_photo_index: int
+    crop_box: tuple[int, int, int, int]
+    image_size: tuple[int, int]
+    data: bytes
+    label: str
 
 
 ROOM_ANALYSIS_SCHEMA = {
@@ -286,9 +297,10 @@ def _generate_gemini_analysis(
 
 def _generate_gemini_damage_annotations(image_paths: list[Path]) -> dict:
     client = genai.Client(api_key=settings.gemini_api_key)
+    annotation_views = _build_annotation_views(image_paths)
     contents = [
-        build_damage_annotation_prompt(len(image_paths)),
-        *_gemini_image_parts(image_paths),
+        build_damage_annotation_prompt(len(annotation_views)),
+        *_gemini_annotation_view_contents(annotation_views),
     ]
 
     response = client.models.generate_content(
@@ -300,7 +312,121 @@ def _generate_gemini_damage_annotations(image_paths: list[Path]) -> dict:
         ),
     )
 
-    return json.loads(_response_text(response))
+    return _map_annotation_payload_to_original(json.loads(_response_text(response)), annotation_views)
+
+
+def _build_annotation_views(image_paths: list[Path]) -> list[AnnotationView]:
+    views = []
+
+    for photo_index, path in enumerate(image_paths):
+        with Image.open(path) as image:
+            image = image.convert("RGB")
+            width, height = image.size
+            regions = _annotation_regions(width, height)
+
+            for label, crop_box in regions:
+                views.append(
+                    AnnotationView(
+                        original_photo_index=photo_index,
+                        crop_box=crop_box,
+                        image_size=(crop_box[2] - crop_box[0], crop_box[3] - crop_box[1]),
+                        data=_crop_to_jpeg_bytes(image, crop_box),
+                        label=label,
+                    )
+                )
+
+    return views
+
+
+def _annotation_regions(width: int, height: int) -> list[tuple[str, tuple[int, int, int, int]]]:
+    x_mid = round(width * 0.5)
+    x_left = round(width * 0.42)
+    y_top = round(height * 0.48)
+    y_bottom = round(height * 0.42)
+
+    regions = [
+        ("full room view", (0, 0, width, height)),
+        ("ceiling and upper wall view", (0, 0, width, max(y_top, 1))),
+        ("left wall detail view", (0, 0, max(x_mid, 1), height)),
+        ("center wall/window detail view", (max(0, x_left // 2), 0, min(width, width - x_left // 2), height)),
+        ("right wall detail view", (min(x_mid, width - 1), 0, width, height)),
+        ("floor and lower wall view", (0, min(y_bottom, height - 1), width, height)),
+    ]
+
+    return _dedupe_regions(regions)
+
+
+def _dedupe_regions(
+    regions: list[tuple[str, tuple[int, int, int, int]]],
+) -> list[tuple[str, tuple[int, int, int, int]]]:
+    seen = set()
+    result = []
+
+    for label, crop_box in regions:
+        left, top, right, bottom = crop_box
+        if right - left < 80 or bottom - top < 80 or crop_box in seen:
+            continue
+        seen.add(crop_box)
+        result.append((label, crop_box))
+
+    return result
+
+
+def _crop_to_jpeg_bytes(image: Image.Image, crop_box: tuple[int, int, int, int]) -> bytes:
+    buffer = BytesIO()
+    image.crop(crop_box).save(buffer, format="JPEG", quality=92)
+    return buffer.getvalue()
+
+
+def _gemini_annotation_view_contents(annotation_views: list[AnnotationView]) -> list[str | types.Part]:
+    contents: list[str | types.Part] = [
+        "The uploaded images below are annotation views, not separate rooms. "
+        "If the same damage appears in multiple views, return the best/tightest visible box."
+    ]
+
+    for index, view in enumerate(annotation_views):
+        contents.extend(
+            [
+                (
+                    f"Annotation view {index}. Use photoIndex {index}. "
+                    f"Original photo {view.original_photo_index}. {view.label}. "
+                    f"Crop box in original pixels: {view.crop_box}."
+                ),
+                types.Part.from_bytes(data=view.data, mime_type="image/jpeg"),
+            ]
+        )
+
+    return contents
+
+
+def _map_annotation_payload_to_original(
+    annotation_payload: dict,
+    annotation_views: list[AnnotationView],
+) -> dict:
+    mapped_annotations = []
+
+    for annotation in annotation_payload.get("damageAnnotations", []):
+        view_index = _safe_photo_index(annotation.get("photoIndex"), len(annotation_views))
+        if view_index >= len(annotation_views):
+            continue
+
+        view = annotation_views[view_index]
+        crop_bbox = _box_2d_to_bbox(annotation.get("box_2d"), view.image_size)
+        if not crop_bbox:
+            continue
+
+        left, top, _, _ = view.crop_box
+        annotation["photoIndex"] = view.original_photo_index
+        annotation["bbox"] = {
+            "x": left + crop_bbox["x"],
+            "y": top + crop_bbox["y"],
+            "width": crop_bbox["width"],
+            "height": crop_bbox["height"],
+        }
+        mapped_annotations.append(annotation)
+
+    annotation_payload["damageAnnotations"] = mapped_annotations
+    return annotation_payload
 
 
 def _attach_damage_annotations(
@@ -322,7 +448,7 @@ def _attach_damage_annotations(
 
         photo_index = _safe_photo_index(annotation.get("photoIndex"), len(image_paths))
         image_size = image_sizes[photo_index] if photo_index < len(image_sizes) else None
-        bbox = _box_2d_to_bbox(annotation.get("box_2d"), image_size)
+        bbox = annotation.get("bbox") or _box_2d_to_bbox(annotation.get("box_2d"), image_size)
         if not bbox:
             continue
 
@@ -678,6 +804,22 @@ def _normalize_risk_summary(payload: dict) -> None:
         severity["safe"] = 1
 
     payload["severitySummary"] = severity
+    severity_percentages = _risk_percentages(severity)
+    payload["severityLevelSummary"] = [
+        {
+            "key": key,
+            "label": label,
+            "count": severity[key],
+            "percentage": severity_percentages[key],
+        }
+        for key, label in (
+            ("critical", "Critical Risk"),
+            ("high", "High Risk"),
+            ("medium", "Medium Risk"),
+            ("low", "Low Risk"),
+            ("safe", "Safe"),
+        )
+    ]
     risk_score = _risk_score(severity)
     payload["overallRisk"] = {
         "score": risk_score,
@@ -689,6 +831,7 @@ def _normalize_risk_summary(payload: dict) -> None:
             "low": severity["low"],
             "safe": severity["safe"],
         },
+        "breakdownPercentages": severity_percentages,
     }
 
 
@@ -714,6 +857,19 @@ def _risk_score(severity: dict[str, int]) -> int:
         + severity["safe"] * 0
     )
     return round(weighted / total)
+
+
+def _risk_percentages(severity: dict[str, int]) -> dict[str, int]:
+    total = sum(severity.values()) or 1
+    percentages = {
+        key: round((value / total) * 100)
+        for key, value in severity.items()
+    }
+    drift = 100 - sum(percentages.values())
+    if drift and severity:
+        largest_key = max(severity, key=lambda key: severity[key])
+        percentages[largest_key] += drift
+    return percentages
 
 
 def _risk_level(score: int) -> str:
@@ -757,8 +913,14 @@ def _clean_annotations(
             continue
         cleaned.append({"markerNumber": annotation.get("markerNumber", 1), "bbox": bbox})
 
-    cleaned = _remove_containing_boxes(cleaned)
-    cleaned.sort(key=lambda item: item["bbox"]["width"] * item["bbox"]["height"])
+    if area not in {"Ceiling", "Walls"}:
+        cleaned = _remove_containing_boxes(cleaned)
+
+    prefer_larger_boxes = area in {"Ceiling", "Walls"}
+    cleaned.sort(
+        key=lambda item: item["bbox"]["width"] * item["bbox"]["height"],
+        reverse=prefer_larger_boxes,
+    )
     selected = []
     for annotation in cleaned:
         if any(_overlaps_too_much(annotation["bbox"], kept["bbox"]) for kept in selected):
@@ -822,10 +984,10 @@ def _is_oversized_bbox(bbox: dict, image_width: int, image_height: int, area: st
         max_height_ratio = 0.55
         edge_area_ratio = 0.18
     elif area == "Walls":
-        max_area_ratio = 0.18
-        max_width_ratio = 0.62
+        max_area_ratio = 0.26
+        max_width_ratio = 0.72
         max_height_ratio = 0.58
-        edge_area_ratio = 0.1
+        edge_area_ratio = 0.18
     elif area == "Floor":
         max_area_ratio = 0.16
         max_width_ratio = 0.65
