@@ -12,6 +12,7 @@ client = AsyncIOMotorClient(
 db = client[settings.database_name]
 
 
+
 async def save_room_analysis(user_id: str, room_id: str, payload: dict) -> None:
     await db.room_analyses.update_one(
         {"userId": user_id, "roomId": room_id},
