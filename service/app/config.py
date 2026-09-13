@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     openai_api_key: str | None = None
     openai_model: str | None = None
     gemini_api_key: str
-    gemini_model: str = "gemini-3.8-flash"
+    gemini_model: str = "gemini-3.1-pro-preview"
     database_url: str
     database_name: str
     aws_access_key_id: str
