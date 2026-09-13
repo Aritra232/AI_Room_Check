@@ -27,6 +27,7 @@ async def save_uploads(files: list[UploadFile], output_dir: Path) -> list[Path]:
     return saved_paths
 
 
+
 def _extension_for(file: UploadFile) -> str:
     filename = file.filename or ""
     suffix = Path(filename).suffix.lower()
