@@ -1,10 +1,10 @@
-from pathlib import Path
 from datetime import date
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from uuid import uuid4
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 
 from service.app.config import settings
 from service.app.db import get_room_analysis, save_room_analysis, save_room_confirmation
@@ -16,7 +16,8 @@ from service.app.schemas import (
 )
 from service.app.services.annotation import create_annotated_images
 from service.app.services.gemini_room_analyzer import analyze_room_photos
-from service.app.services.storage import delete_paths, save_uploads
+from service.app.services.s3_storage import upload_annotated_images
+from service.app.services.storage import save_uploads
 
 
 app = FastAPI(title=settings.app_name)
@@ -28,10 +29,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-app.mount("/media", StaticFiles(directory=settings.storage_dir), name="media")
-app.mount("/Annotated", StaticFiles(directory=settings.annotated_dir), name="annotated")
-
 
 @app.get("/health")
 async def health() -> dict[str, str]:
@@ -51,21 +48,25 @@ async def analyze_room(
 
     room_id = f"room_{uuid4().hex}"
     analysis_id = uuid4().hex
-    analysis_dir = settings.storage_dir / "users" / user_id / "rooms" / room_id / analysis_id
-    original_paths = await save_uploads(photos, analysis_dir / "originals")
 
-    try:
+    with TemporaryDirectory(prefix="room-inspection-") as temp_dir:
+        analysis_dir = Path(temp_dir) / "analysis"
+        original_paths = await save_uploads(photos, analysis_dir / "originals")
+        annotated_dir = analysis_dir / "annotated"
+
         ai_result = await analyze_room_photos(user_id, room_id, original_paths, analysis_id)
         annotated_paths = create_annotated_images(
             original_paths=original_paths,
             issues=ai_result.detectedIssues,
-            output_dir=settings.annotated_dir,
+            output_dir=annotated_dir,
             filename_prefix=f"{room_id}_{analysis_id}",
         )
-    finally:
-        delete_paths([analysis_dir])
-
-    annotated_urls = [_annotated_url(path) for path in annotated_paths]
+        annotated_urls = await upload_annotated_images(
+            annotated_paths,
+            user_id,
+            room_id,
+            analysis_id,
+        )
 
     analysis_data = ai_result.model_dump()
     analysis_data.update(
@@ -102,13 +103,6 @@ async def confirm_room_analysis(
 ) -> ConfirmAnalysisResponse:
     await save_room_confirmation(user_id, room_id, payload.model_dump())
     return ConfirmAnalysisResponse(userId=user_id, roomId=room_id, status="saved")
-
-
-def _annotated_url(path: Path) -> str:
-    relative = path.relative_to(settings.annotated_dir).as_posix()
-    return f"/Annotated/{relative}"
-
-
 def _build_report_preview(analysis: dict) -> dict:
     findings = []
     original_urls = analysis["originalImageUrls"]

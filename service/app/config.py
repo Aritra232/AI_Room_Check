@@ -17,8 +17,10 @@ class Settings(BaseSettings):
     gemini_model: str = "gemini-3.8-flash"
     database_url: str
     database_name: str
-    storage_dir: Path = ROOT_DIR / "service" / "storage"
-    annotated_dir: Path = ROOT_DIR / "Annotated"
+    aws_access_key_id: str
+    aws_secret_access_key: str
+    s3_region: str
+    aws_s3_bucket_name: str
     cors_origins: list[str] = ["*"]
 
     model_config = SettingsConfigDict(
@@ -31,8 +33,6 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     settings = Settings()
-    settings.storage_dir.mkdir(parents=True, exist_ok=True)
-    settings.annotated_dir.mkdir(parents=True, exist_ok=True)
     return settings
 
 

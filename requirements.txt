@@ -6,3 +6,4 @@ google-genai==1.31.0
 pillow==11.3.0
 pydantic-settings==2.10.1
 motor==3.7.1
+boto3==1.35.99
