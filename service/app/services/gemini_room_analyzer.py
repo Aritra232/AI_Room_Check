@@ -764,21 +764,16 @@ def _response_text(response) -> str:
 
 def _normalize_annotations(payload: dict, image_paths: list[Path]) -> None:
     image_sizes = [_image_size(path) for path in image_paths]
-    marker_number = 1
     normalized_issues = []
 
     for issue in payload.get("detectedIssues", []):
         annotations = issue.get("annotations") or []
         if not annotations and issue.get("bbox"):
-            annotations = [{"markerNumber": marker_number, "bbox": issue["bbox"]}]
+            annotations = [{"markerNumber": 1, "bbox": issue["bbox"]}]
 
         photo_index = issue.get("photoIndex", 0)
         image_size = image_sizes[photo_index] if photo_index < len(image_sizes) else None
         annotations = _clean_annotations(annotations, image_size, issue.get("area", ""))
-
-        for annotation in annotations:
-            annotation["markerNumber"] = marker_number
-            marker_number += 1
 
         issue["annotations"] = annotations
         if annotations:
@@ -788,6 +783,20 @@ def _normalize_annotations(payload: dict, image_paths: list[Path]) -> None:
         issue.setdefault("location", f"Detected near {issue.get('area', 'room area')}")
         issue.setdefault("details", issue.get("description", "Visible damage detected."))
         normalized_issues.append(issue)
+
+    if payload.get("inspectionType") != "interior":
+        normalized_issues = _remove_cross_issue_overlaps(normalized_issues)
+
+    marker_number = 1
+    for issue in normalized_issues:
+        for annotation in issue.get("annotations", []):
+            annotation["markerNumber"] = marker_number
+            marker_number += 1
+
+        if issue.get("annotations"):
+            issue["bbox"] = issue["annotations"][0]["bbox"]
+        else:
+            issue["bbox"] = None
 
     payload["detectedIssues"] = normalized_issues
 
@@ -1045,6 +1054,110 @@ def _remove_near_duplicate_boxes(annotations: list[dict]) -> list[dict]:
         result.append(annotation)
 
     return result
+
+
+def _remove_cross_issue_overlaps(issues: list[dict]) -> list[dict]:
+    selected_by_photo: dict[int, list[dict]] = {}
+
+    candidates = []
+    for issue_index, issue in enumerate(issues):
+        photo_index = issue.get("photoIndex", 0)
+        for annotation_index, annotation in enumerate(issue.get("annotations", [])):
+            candidates.append(
+                {
+                    "issue_index": issue_index,
+                    "annotation_index": annotation_index,
+                    "photo_index": photo_index,
+                    "bbox": annotation["bbox"],
+                    "score": _annotation_keep_score(issue, annotation),
+                }
+            )
+
+    candidates.sort(key=lambda item: item["score"], reverse=True)
+    kept_keys: set[tuple[int, int]] = set()
+
+    for candidate in candidates:
+        photo_index = candidate["photo_index"]
+        selected = selected_by_photo.setdefault(photo_index, [])
+        if any(_is_same_visual_area(candidate["bbox"], kept["bbox"]) for kept in selected):
+            continue
+
+        selected.append(candidate)
+        kept_keys.add((candidate["issue_index"], candidate["annotation_index"]))
+
+    for issue_index, issue in enumerate(issues):
+        annotations = []
+        for annotation_index, annotation in enumerate(issue.get("annotations", [])):
+            if (issue_index, annotation_index) in kept_keys:
+                annotations.append(annotation)
+
+        issue["annotations"] = annotations
+        issue["bbox"] = annotations[0]["bbox"] if annotations else None
+
+    return issues
+
+
+def _annotation_keep_score(issue: dict, annotation: dict) -> tuple[int, int, int]:
+    bbox = annotation["bbox"]
+    area = bbox["width"] * bbox["height"]
+    return (
+        -area,
+        _risk_priority(issue.get("riskLevel", "Safe")),
+        _clamp_confidence(issue.get("confidence")),
+    )
+
+
+def _risk_priority(risk_level: str) -> int:
+    if risk_level == "Critical Risk":
+        return 4
+    if risk_level == "High Risk":
+        return 3
+    if risk_level == "Medium Risk":
+        return 2
+    if risk_level == "Low Risk":
+        return 1
+    return 0
+
+
+def _is_same_visual_area(first: dict, second: dict) -> bool:
+    intersection = _intersection_area(first, second)
+    if intersection == 0:
+        return False
+
+    first_area = first["width"] * first["height"]
+    second_area = second["width"] * second["height"]
+    smaller_area = min(first_area, second_area)
+    larger_area = max(first_area, second_area)
+    union_area = first_area + second_area - intersection
+    size_similarity = smaller_area / larger_area
+    center_distance = _bbox_center_distance_ratio(first, second)
+
+    if intersection / union_area > 0.48:
+        return True
+
+    if size_similarity > 0.55 and intersection / smaller_area > 0.72:
+        return True
+
+    return center_distance < 0.12 and intersection / smaller_area > 0.55
+
+
+def _bbox_center_distance_ratio(first: dict, second: dict) -> float:
+    first_center_x = first["x"] + first["width"] / 2
+    first_center_y = first["y"] + first["height"] / 2
+    second_center_x = second["x"] + second["width"] / 2
+    second_center_y = second["y"] + second["height"] / 2
+
+    first_area = first["width"] * first["height"]
+    second_area = second["width"] * second["height"]
+    average_box_size = ((first_area + second_area) / 2) ** 0.5
+    if average_box_size <= 0:
+        return 1
+
+    distance = (
+        (first_center_x - second_center_x) ** 2
+        + (first_center_y - second_center_y) ** 2
+    ) ** 0.5
+    return distance / average_box_size
 
 
 def _is_near_duplicate_bbox(first: dict, second: dict) -> bool:

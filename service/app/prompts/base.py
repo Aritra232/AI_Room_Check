@@ -61,6 +61,10 @@ Annotation rules:
 - For separated damage patches/components, use separated boxes.
 - Avoid heavy overlap. If two boxes would overlap heavily, use the one that better
   covers the damaged material/component.
+- If one exact damaged patch/component is already covered by an annotation, do not add
+  a duplicate annotation for that same patch under a different issue name.
+- Do not skip a separate nearby damaged patch just because it belongs to the same
+  broad issue category.
 - Include side-edge and corner damage when clearly visible.
 - It is better to return no annotation for an issue than to annotate a clean/normal area.
 
@@ -129,6 +133,10 @@ Critical rules:
 - For one connected damaged patch/component, return one practical tight box.
 - For separated patches/components, return separated boxes.
 - Avoid heavy overlap. If two boxes overlap heavily, keep the tighter one.
+- If one exact damaged patch/component is already covered by a candidate box, do not
+  return a duplicate box for that same patch under another category or issue name.
+- Return separate boxes for separate nearby damaged patches, even when they belong to
+  the same broad issue category.
 - Return every clearly visible damaged patch/component that matters for inspection; the
   count can be 0, 1, 2, 5, 8, or any number required by the photo.
 - Do not return clean/normal areas.
