@@ -1,4 +1,5 @@
 import asyncio
+from copy import deepcopy
 from dataclasses import dataclass
 from io import BytesIO
 import json
@@ -9,11 +10,11 @@ from google.genai import types
 from PIL import Image
 
 from service.app.config import settings
-from service.app.prompt import build_damage_annotation_prompt, build_room_analysis_prompt
+from service.app.inspection_modules import get_inspection_module
+from service.app.prompts import build_damage_annotation_prompt, build_room_analysis_prompt
 from service.app.schemas import RoomAnalysis
 
 
-INSPECTION_AREAS = {"Ceiling", "Walls", "Windows", "Floor", "Electrical outlets"}
 RISK_LEVELS = {"Safe", "Low Risk", "Medium Risk", "High Risk", "Critical Risk"}
 MIN_ANNOTATION_CONFIDENCE = 60
 
@@ -57,12 +58,13 @@ ROOM_ANALYSIS_SCHEMA = {
                     "type": "object",
                     "additionalProperties": False,
                     "properties": {
+                        "critical": {"type": "integer"},
                         "high": {"type": "integer"},
                         "medium": {"type": "integer"},
                         "low": {"type": "integer"},
                         "safe": {"type": "integer"},
                     },
-                    "required": ["high", "medium", "low", "safe"],
+                    "required": ["critical", "high", "medium", "low", "safe"],
                 },
             },
             "required": ["score", "level", "breakdown"],
@@ -239,23 +241,42 @@ DAMAGE_ANNOTATION_SCHEMA = {
 }
 
 
+def _analysis_schema_for(areas: tuple[str, ...]) -> dict:
+    schema = deepcopy(ROOM_ANALYSIS_SCHEMA)
+    area_enum = list(areas)
+    schema["properties"]["recommendedActions"]["items"]["properties"]["area"]["enum"] = area_enum
+    schema["properties"]["detectedIssues"]["items"]["properties"]["area"]["enum"] = area_enum
+    schema["properties"]["areas"]["items"]["properties"]["name"]["enum"] = area_enum
+    return schema
+
+
+def _annotation_schema_for(areas: tuple[str, ...]) -> dict:
+    schema = deepcopy(DAMAGE_ANNOTATION_SCHEMA)
+    schema["properties"]["damageAnnotations"]["items"]["properties"]["area"]["enum"] = list(areas)
+    return schema
+
+
 async def analyze_room_photos(
     user_id: str,
     room_id: str,
     image_paths: list[Path],
     analysis_id: str,
+    inspection_type: str = "interior",
 ) -> RoomAnalysis:
+    module = get_inspection_module(inspection_type)
     payload = await asyncio.to_thread(
         _generate_gemini_analysis,
         user_id,
         room_id,
         image_paths,
         analysis_id,
+        module.key,
     )
 
     payload["analysisId"] = analysis_id
     payload["userId"] = user_id
     payload["roomId"] = room_id
+    payload["inspectionType"] = module.key
     payload["status"] = "completed"
     payload["photosAnalyzed"] = len(image_paths)
     payload["originalImageUrls"] = []
@@ -266,8 +287,9 @@ async def analyze_room_photos(
         _generate_gemini_damage_annotations,
         image_paths,
         payload,
+        module.key,
     )
-    _attach_damage_annotations(payload, annotation_payload, image_paths)
+    _attach_damage_annotations(payload, annotation_payload, image_paths, module.areas)
     _normalize_annotations(payload, image_paths)
     missing_issues = _issues_without_annotations(payload)
     if missing_issues:
@@ -275,11 +297,13 @@ async def analyze_room_photos(
             _generate_gemini_damage_annotations,
             image_paths,
             {"detectedIssues": missing_issues},
+            module.key,
         )
         _attach_damage_annotations(
             payload,
             focused_annotation_payload,
             image_paths,
+            module.areas,
             clear_existing=False,
         )
         _normalize_annotations(payload, image_paths)
@@ -296,10 +320,12 @@ def _generate_gemini_analysis(
     room_id: str,
     image_paths: list[Path],
     analysis_id: str,
+    inspection_type: str,
 ) -> dict:
+    module = get_inspection_module(inspection_type)
     client = genai.Client(api_key=settings.gemini_api_key)
     contents = [
-        build_room_analysis_prompt(user_id, room_id, len(image_paths), analysis_id),
+        build_room_analysis_prompt(user_id, room_id, len(image_paths), analysis_id, module.key),
         *_gemini_image_parts(image_paths),
     ]
 
@@ -308,20 +334,26 @@ def _generate_gemini_analysis(
         contents=contents,
         config=types.GenerateContentConfig(
             response_mime_type="application/json",
-            response_schema=_gemini_compatible_schema(ROOM_ANALYSIS_SCHEMA),
+            response_schema=_gemini_compatible_schema(_analysis_schema_for(module.areas)),
         ),
     )
 
     return json.loads(_response_text(response))
 
 
-def _generate_gemini_damage_annotations(image_paths: list[Path], payload: dict) -> dict:
+def _generate_gemini_damage_annotations(
+    image_paths: list[Path],
+    payload: dict,
+    inspection_type: str,
+) -> dict:
+    module = get_inspection_module(inspection_type)
     client = genai.Client(api_key=settings.gemini_api_key)
     annotation_views = _build_annotation_views(image_paths)
     contents = [
         build_damage_annotation_prompt(
             len(annotation_views),
             _expected_issue_context(payload),
+            module.key,
         ),
         *_gemini_annotation_view_contents(annotation_views),
     ]
@@ -331,7 +363,7 @@ def _generate_gemini_damage_annotations(image_paths: list[Path], payload: dict) 
         contents=contents,
         config=types.GenerateContentConfig(
             response_mime_type="application/json",
-            response_schema=_gemini_compatible_schema(DAMAGE_ANNOTATION_SCHEMA),
+            response_schema=_gemini_compatible_schema(_annotation_schema_for(module.areas)),
         ),
     )
 
@@ -481,6 +513,7 @@ def _attach_damage_annotations(
     payload: dict,
     annotation_payload: dict,
     image_paths: list[Path],
+    inspection_areas: tuple[str, ...],
     clear_existing: bool = True,
 ) -> None:
     if clear_existing:
@@ -489,6 +522,7 @@ def _attach_damage_annotations(
             issue["bbox"] = None
 
     image_sizes = [_image_size(path) for path in image_paths]
+    allowed_areas = set(inspection_areas)
     fallback_issues: dict[tuple[int, str], dict] = {}
 
     for annotation in annotation_payload.get("damageAnnotations", []):
@@ -496,7 +530,7 @@ def _attach_damage_annotations(
             continue
 
         area = annotation.get("area")
-        if area not in INSPECTION_AREAS:
+        if area not in allowed_areas:
             continue
 
         photo_index = _safe_photo_index(annotation.get("photoIndex"), len(image_paths))
@@ -1074,12 +1108,12 @@ def _is_oversized_bbox(bbox: dict, image_width: int, image_height: int, area: st
     touches_left_or_right = bbox["x"] <= 2 or bbox["x"] + bbox["width"] >= image_width - 2
     touches_top_or_bottom = bbox["y"] <= 2 or bbox["y"] + bbox["height"] >= image_height - 2
 
-    if area == "Ceiling":
+    if area in {"Ceiling", "Shingles/tiles", "Sagging/leaks"}:
         max_area_ratio = 0.32
         max_width_ratio = 0.9
-        max_height_ratio = 0.55
+        max_height_ratio = 0.75 if area != "Ceiling" else 0.55
         edge_area_ratio = 0.18
-    elif area == "Walls":
+    elif area in {"Walls", "Foundation", "Siding/walls", "Exterior cracks/moisture"}:
         max_area_ratio = 0.26
         max_width_ratio = 0.72
         max_height_ratio = 0.58
@@ -1089,11 +1123,31 @@ def _is_oversized_bbox(bbox: dict, image_width: int, image_height: int, area: st
         max_width_ratio = 0.65
         max_height_ratio = 0.5
         edge_area_ratio = 0.09
-    elif area == "Windows":
+    elif area in {"Windows", "Doors/windows"}:
         max_area_ratio = 0.16
         max_width_ratio = 0.46
         max_height_ratio = 0.82
         edge_area_ratio = 0.08
+    elif area in {
+        "Outdoor unit",
+        "Indoor unit",
+        "Ducting",
+        "Thermostat/wiring",
+        "Visible leaks/rust/damage",
+        "Tank condition",
+        "Pipe connections",
+        "Pressure relief valve",
+        "Rust/corrosion",
+        "Leakage/drain pan/venting",
+        "Flashing",
+        "Gutters",
+        "Chimney/vents",
+        "Drainage/gutters",
+    }:
+        max_area_ratio = 0.28
+        max_width_ratio = 0.8
+        max_height_ratio = 0.8
+        edge_area_ratio = 0.16
     else:
         max_area_ratio = 0.06
         max_width_ratio = 0.35

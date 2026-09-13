@@ -84,7 +84,10 @@ Keep summaries short and direct.
 """.strip()
 
 
-def build_damage_annotation_prompt(photo_count: int, expected_issues: str = "") -> str:
+def build_damage_annotation_prompt(
+    photo_count: int,
+    expected_issues: str = "",
+) -> str:
     issue_instruction = ""
     if expected_issues:
         issue_instruction = f"""

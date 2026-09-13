@@ -3,7 +3,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
-InspectionArea = Literal["Ceiling", "Walls", "Windows", "Floor", "Electrical outlets"]
+InspectionArea = str
 RiskLevel = Literal["Safe", "Low Risk", "Medium Risk", "High Risk", "Critical Risk"]
 AreaStatus = Literal["checked", "issue_found", "not_visible", "needs_more_photo"]
 
@@ -110,6 +110,7 @@ class RoomAnalysis(BaseModel):
     analysisId: str
     userId: str
     roomId: str
+    inspectionType: str = "interior"
     roomName: str
     status: Literal["completed"]
     photosAnalyzed: int
@@ -131,6 +132,7 @@ class RoomAnalysisResponse(BaseModel):
     analysisId: str
     userId: str
     roomId: str
+    inspectionType: str = "interior"
     roomName: str
     status: Literal["completed"]
     photosAnalyzed: int
