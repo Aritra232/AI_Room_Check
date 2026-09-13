@@ -90,7 +90,7 @@ def build_damage_annotation_prompt(photo_count: int, expected_issues: str = "") 
         issue_instruction = f"""
 
 The inspection analysis already found these report issues. For every issue below,
-return at least one annotation when its visible damaged material can be localized.
+return candidate annotations when its visible damaged material can be localized.
 Set issueId exactly to the matching id:
 {expected_issues}
 """
@@ -99,14 +99,23 @@ Set issueId exactly to the matching id:
 You are a visual damage localization model for a property inspection app.
 Analyze {photo_count} annotation view image(s) and return JSON only.
 
-Your only job is to locate visible damaged building material so the backend can draw
-red numbered boxes on the annotated JPG. Do not create a report here.
+Your only job is to locate visible damaged building material candidates so the backend
+can draw red numbered boxes on the annotated JPG. Do not create a report here.
 
 Use box_2d as [ymin, xmin, ymax, xmax] normalized to a 0-1000 coordinate space.
 Each box must tightly surround the damaged patch itself.
 Set photoIndex to the annotation view index described in the message after this prompt.
 Set issueId to the matching detected issue id when the damage belongs to an expected
 issue. If the damage is real but does not match an expected issue, use issueId "extra".
+Set confidence to your visual confidence that the box contains real damaged building
+material. Return candidate boxes with confidence 0-100. Do not self-filter at 60; the
+backend will draw only candidates whose confidence is 60 or higher.
+Use this confidence calibration:
+- 90-100: unmistakable damage with a clear boundary.
+- 75-89: clear damage, but boundary or exact extent is somewhat approximate.
+- 60-74: probable visible damage, often on side walls, edges, corners, partial views,
+  or repeated surface deterioration.
+- Below 60: uncertain candidate; include only if it may help inspect a reported issue.
 {issue_instruction}
 
 Allowed areas:
@@ -146,5 +155,7 @@ Critical rules:
 - Avoid heavy overlap. If two boxes overlap heavily, keep the tighter one.
 - Return every clearly visible damaged patch that matters for inspection; the count can
   be 0, 1, 2, 5, 8, or any number required by the photo.
-- If you are unsure whether an area is damaged, do not annotate it.
+- If a side wall, side window/frame, corner, or ceiling edge has probable visible damage
+  return it as a candidate instead of skipping it, even when the boundary is approximate.
+- Do not return clean/normal areas.
 """.strip()

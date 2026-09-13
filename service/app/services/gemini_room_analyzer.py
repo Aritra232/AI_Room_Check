@@ -15,6 +15,7 @@ from service.app.schemas import RoomAnalysis
 
 INSPECTION_AREAS = {"Ceiling", "Walls", "Windows", "Floor", "Electrical outlets"}
 RISK_LEVELS = {"Safe", "Low Risk", "Medium Risk", "High Risk", "Critical Risk"}
+MIN_ANNOTATION_CONFIDENCE = 60
 
 
 @dataclass(frozen=True)
@@ -96,7 +97,6 @@ ROOM_ANALYSIS_SCHEMA = {
                 "properties": {
                     "id": {"type": "string"},
                     "photoIndex": {"type": "integer"},
-                    "issueId": {"type": "string"},
                     "area": {
                         "type": "string",
                         "enum": ["Ceiling", "Walls", "Windows", "Floor", "Electrical outlets"],
@@ -148,7 +148,6 @@ ROOM_ANALYSIS_SCHEMA = {
                 "required": [
                     "id",
                     "photoIndex",
-                    "issueId",
                     "area",
                     "issueType",
                     "riskLevel",
@@ -206,6 +205,7 @@ DAMAGE_ANNOTATION_SCHEMA = {
                 "additionalProperties": False,
                 "properties": {
                     "photoIndex": {"type": "integer"},
+                    "issueId": {"type": "string"},
                     "area": {
                         "type": "string",
                         "enum": ["Ceiling", "Walls", "Windows", "Floor", "Electrical outlets"],
@@ -224,6 +224,7 @@ DAMAGE_ANNOTATION_SCHEMA = {
                 },
                 "required": [
                     "photoIndex",
+                    "issueId",
                     "area",
                     "issueType",
                     "riskLevel",
@@ -491,6 +492,9 @@ def _attach_damage_annotations(
     fallback_issues: dict[tuple[int, str], dict] = {}
 
     for annotation in annotation_payload.get("damageAnnotations", []):
+        if _clamp_confidence(annotation.get("confidence")) < MIN_ANNOTATION_CONFIDENCE:
+            continue
+
         area = annotation.get("area")
         if area not in INSPECTION_AREAS:
             continue
@@ -667,7 +671,7 @@ def _clamp_confidence(value: object) -> int:
     try:
         confidence = int(value)
     except (TypeError, ValueError):
-        return 85
+        return 0
     return min(max(confidence, 0), 100)
 
 
