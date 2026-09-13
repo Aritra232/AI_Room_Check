@@ -23,7 +23,6 @@ WORKDIR /app
 
 RUN addgroup --system app && \
     adduser --system --ingroup app app && \
-    mkdir -p /app/service/storage && \
     chown -R app:app /app
 
 COPY --from=builder /opt/venv /opt/venv

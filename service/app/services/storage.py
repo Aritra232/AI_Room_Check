@@ -1,4 +1,5 @@
 from pathlib import Path
+import shutil
 
 from fastapi import HTTPException, UploadFile
 
@@ -36,3 +37,11 @@ def _extension_for(file: UploadFile) -> str:
     if file.content_type == "image/webp":
         return ".webp"
     return ".jpg"
+
+
+def delete_paths(paths: list[Path]) -> None:
+    for path in paths:
+        if path.is_dir():
+            shutil.rmtree(path, ignore_errors=True)
+        elif path.exists():
+            path.unlink(missing_ok=True)

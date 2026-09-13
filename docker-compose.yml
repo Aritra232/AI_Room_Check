@@ -8,11 +8,4 @@ services:
       - .env
     ports:
       - "8000:8000"
-    volumes:
-      - service-storage:/app/service/storage
-      - annotated-images:/app/Annotated
     restart: unless-stopped
-
-volumes:
-  service-storage:
-  annotated-images:
