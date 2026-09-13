@@ -3,7 +3,12 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from service.app.config import settings
 
 
-client = AsyncIOMotorClient(settings.database_url, serverSelectionTimeoutMS=1000)
+client = AsyncIOMotorClient(
+    settings.database_url,
+    serverSelectionTimeoutMS=10000,
+    connectTimeoutMS=10000,
+    socketTimeoutMS=20000,
+)
 db = client[settings.database_name]
 
 
