@@ -23,6 +23,10 @@ Inspect exactly these five categories:
 4. Floor
 5. Electrical outlets
 
+Inspect the entire image from edge to edge. Do not focus only on the front/center
+wall. Check left wall, right wall, side walls, corners, ceiling edges, lower wall
+edges, windows/frames on the sides, and any visible electrical fixtures on side walls.
+
 Report only visible property/building defects. Do not exaggerate severity or invent
 damage that is hidden behind furniture, debris, glare, shadows, or low image quality:
 - water intrusion, water stains, dampness, leaks
@@ -74,11 +78,23 @@ Annotation rules:
 
 The uploaded example style expects red numbered boxes only on true damaged areas.
 Do not invent hidden damage. If an area is not visible, mark it not_visible.
+For area confidence, use only visual inspection confidence for visible/partially visible
+areas. Do not use confidence to mean "confidence that this area is absent."
 Keep summaries short and direct.
 """.strip()
 
 
-def build_damage_annotation_prompt(photo_count: int) -> str:
+def build_damage_annotation_prompt(photo_count: int, expected_issues: str = "") -> str:
+    issue_instruction = ""
+    if expected_issues:
+        issue_instruction = f"""
+
+The inspection analysis already found these report issues. For every issue below,
+return at least one annotation when its visible damaged material can be localized.
+Set issueId exactly to the matching id:
+{expected_issues}
+"""
+
     return f"""
 You are a visual damage localization model for a property inspection app.
 Analyze {photo_count} annotation view image(s) and return JSON only.
@@ -89,6 +105,9 @@ red numbered boxes on the annotated JPG. Do not create a report here.
 Use box_2d as [ymin, xmin, ymax, xmax] normalized to a 0-1000 coordinate space.
 Each box must tightly surround the damaged patch itself.
 Set photoIndex to the annotation view index described in the message after this prompt.
+Set issueId to the matching detected issue id when the damage belongs to an expected
+issue. If the damage is real but does not match an expected issue, use issueId "extra".
+{issue_instruction}
 
 Allowed areas:
 1. Ceiling
@@ -111,6 +130,9 @@ Mark these visible defects:
   or socket.
 
 Critical rules:
+- Inspect every annotation view from edge to edge. Do not focus only on the center/front
+  wall. Side walls, left/right edges, corners, ceiling edges, lower wall edges, side
+  windows/frames, and side electrical fixtures are equally important.
 - Box damaged material only. Never box the full wall, full ceiling, full window, full
   floor, furniture, plants, beds, curtains, shadows, sunlight, door openings, or clean
   surfaces.

@@ -96,6 +96,7 @@ ROOM_ANALYSIS_SCHEMA = {
                 "properties": {
                     "id": {"type": "string"},
                     "photoIndex": {"type": "integer"},
+                    "issueId": {"type": "string"},
                     "area": {
                         "type": "string",
                         "enum": ["Ceiling", "Walls", "Windows", "Floor", "Electrical outlets"],
@@ -147,6 +148,7 @@ ROOM_ANALYSIS_SCHEMA = {
                 "required": [
                     "id",
                     "photoIndex",
+                    "issueId",
                     "area",
                     "issueType",
                     "riskLevel",
@@ -242,15 +244,12 @@ async def analyze_room_photos(
     image_paths: list[Path],
     analysis_id: str,
 ) -> RoomAnalysis:
-    payload, annotation_payload = await asyncio.gather(
-        asyncio.to_thread(
-            _generate_gemini_analysis,
-            user_id,
-            room_id,
-            image_paths,
-            analysis_id,
-        ),
-        asyncio.to_thread(_generate_gemini_damage_annotations, image_paths),
+    payload = await asyncio.to_thread(
+        _generate_gemini_analysis,
+        user_id,
+        room_id,
+        image_paths,
+        analysis_id,
     )
 
     payload["analysisId"] = analysis_id
@@ -261,9 +260,29 @@ async def analyze_room_photos(
     payload["originalImageUrls"] = []
     payload["annotatedImageUrl"] = None
     payload["annotatedImages"] = []
+    _normalize_detected_issues(payload)
+    annotation_payload = await asyncio.to_thread(
+        _generate_gemini_damage_annotations,
+        image_paths,
+        payload,
+    )
     _attach_damage_annotations(payload, annotation_payload, image_paths)
     _normalize_annotations(payload, image_paths)
-    _normalize_detected_issues(payload)
+    missing_issues = _issues_without_annotations(payload)
+    if missing_issues:
+        focused_annotation_payload = await asyncio.to_thread(
+            _generate_gemini_damage_annotations,
+            image_paths,
+            {"detectedIssues": missing_issues},
+        )
+        _attach_damage_annotations(
+            payload,
+            focused_annotation_payload,
+            image_paths,
+            clear_existing=False,
+        )
+        _normalize_annotations(payload, image_paths)
+
     _normalize_recommended_actions(payload)
     _normalize_area_statuses(payload)
     _normalize_risk_summary(payload)
@@ -295,11 +314,14 @@ def _generate_gemini_analysis(
     return json.loads(_response_text(response))
 
 
-def _generate_gemini_damage_annotations(image_paths: list[Path]) -> dict:
+def _generate_gemini_damage_annotations(image_paths: list[Path], payload: dict) -> dict:
     client = genai.Client(api_key=settings.gemini_api_key)
     annotation_views = _build_annotation_views(image_paths)
     contents = [
-        build_damage_annotation_prompt(len(annotation_views)),
+        build_damage_annotation_prompt(
+            len(annotation_views),
+            _expected_issue_context(payload),
+        ),
         *_gemini_annotation_view_contents(annotation_views),
     ]
 
@@ -313,6 +335,20 @@ def _generate_gemini_damage_annotations(image_paths: list[Path]) -> dict:
     )
 
     return _map_annotation_payload_to_original(json.loads(_response_text(response)), annotation_views)
+
+
+def _expected_issue_context(payload: dict) -> str:
+    lines = []
+    for issue in payload.get("detectedIssues", []):
+        lines.append(
+            "- "
+            f"id={issue.get('id')}; "
+            f"area={issue.get('area')}; "
+            f"type={issue.get('issueType')}; "
+            f"location={issue.get('location')}; "
+            f"description={issue.get('description')}"
+        )
+    return "\n".join(lines)
 
 
 def _build_annotation_views(image_paths: list[Path]) -> list[AnnotationView]:
@@ -339,18 +375,29 @@ def _build_annotation_views(image_paths: list[Path]) -> list[AnnotationView]:
 
 
 def _annotation_regions(width: int, height: int) -> list[tuple[str, tuple[int, int, int, int]]]:
-    x_mid = round(width * 0.5)
-    x_left = round(width * 0.42)
-    y_top = round(height * 0.48)
-    y_bottom = round(height * 0.42)
+    x25 = round(width * 0.25)
+    x35 = round(width * 0.35)
+    x50 = round(width * 0.5)
+    x65 = round(width * 0.65)
+    x75 = round(width * 0.75)
+    y35 = round(height * 0.35)
+    y48 = round(height * 0.48)
+    y42 = round(height * 0.42)
+    y62 = round(height * 0.62)
 
     regions = [
         ("full room view", (0, 0, width, height)),
-        ("ceiling and upper wall view", (0, 0, width, max(y_top, 1))),
-        ("left wall detail view", (0, 0, max(x_mid, 1), height)),
-        ("center wall/window detail view", (max(0, x_left // 2), 0, min(width, width - x_left // 2), height)),
-        ("right wall detail view", (min(x_mid, width - 1), 0, width, height)),
-        ("floor and lower wall view", (0, min(y_bottom, height - 1), width, height)),
+        ("ceiling and upper wall full-width view", (0, 0, width, max(y48, 1))),
+        ("left wall full-height detail view", (0, 0, max(x50, 1), height)),
+        ("right wall full-height detail view", (min(x50, width - 1), 0, width, height)),
+        ("left side wall edge view", (0, 0, max(x35, 1), height)),
+        ("right side wall edge view", (min(x65, width - 1), 0, width, height)),
+        ("left upper corner and ceiling edge view", (0, 0, max(x50, 1), max(y62, 1))),
+        ("right upper corner and ceiling edge view", (min(x50, width - 1), 0, width, max(y62, 1))),
+        ("left lower wall and floor edge view", (0, min(y35, height - 1), max(x50, 1), height)),
+        ("right lower wall and floor edge view", (min(x50, width - 1), min(y35, height - 1), width, height)),
+        ("center wall/window detail view", (max(0, x25), 0, min(width, x75), height)),
+        ("floor and lower wall full-width view", (0, min(y42, height - 1), width, height)),
     ]
 
     return _dedupe_regions(regions)
@@ -433,10 +480,12 @@ def _attach_damage_annotations(
     payload: dict,
     annotation_payload: dict,
     image_paths: list[Path],
+    clear_existing: bool = True,
 ) -> None:
-    for issue in payload.get("detectedIssues", []):
-        issue["annotations"] = []
-        issue["bbox"] = None
+    if clear_existing:
+        for issue in payload.get("detectedIssues", []):
+            issue["annotations"] = []
+            issue["bbox"] = None
 
     image_sizes = [_image_size(path) for path in image_paths]
     fallback_issues: dict[tuple[int, str], dict] = {}
@@ -462,6 +511,14 @@ def _attach_damage_annotations(
             )
 
         target_issue.setdefault("annotations", []).append({"markerNumber": 1, "bbox": bbox})
+
+
+def _issues_without_annotations(payload: dict) -> list[dict]:
+    return [
+        issue
+        for issue in payload.get("detectedIssues", [])
+        if issue.get("riskLevel") != "Safe" and not issue.get("annotations")
+    ]
 
 
 def _safe_photo_index(value: object, photo_count: int) -> int:
@@ -509,6 +566,12 @@ def _box_2d_to_bbox(
 
 
 def _find_issue_for_annotation(payload: dict, annotation: dict) -> dict | None:
+    issue_id = annotation.get("issueId")
+    if issue_id and issue_id != "extra":
+        for issue in payload.get("detectedIssues", []):
+            if issue.get("id") == issue_id:
+                return issue
+
     area = annotation.get("area")
     issue_type = _normalize_text(annotation.get("issueType", ""))
     candidates = [
@@ -785,6 +848,7 @@ def _normalize_area_statuses(payload: dict) -> None:
     for area in payload.get("areas", []):
         if not area.get("visible"):
             area["status"] = "not_visible"
+            area["confidence"] = None
             continue
         if area["name"] in issue_areas:
             area["status"] = "issue_found"
@@ -927,8 +991,36 @@ def _clean_annotations(
             continue
         selected.append(annotation)
 
+    selected = _remove_near_duplicate_boxes(selected)
+
     selected.sort(key=lambda item: (item["bbox"]["y"], item["bbox"]["x"]))
     return selected
+
+
+def _remove_near_duplicate_boxes(annotations: list[dict]) -> list[dict]:
+    result = []
+
+    for annotation in annotations:
+        bbox = annotation["bbox"]
+        if any(_is_near_duplicate_bbox(bbox, kept["bbox"]) for kept in result):
+            continue
+        result.append(annotation)
+
+    return result
+
+
+def _is_near_duplicate_bbox(first: dict, second: dict) -> bool:
+    intersection = _intersection_area(first, second)
+    if intersection == 0:
+        return False
+
+    first_area = first["width"] * first["height"]
+    second_area = second["width"] * second["height"]
+    smaller_area = min(first_area, second_area)
+    larger_area = max(first_area, second_area)
+
+    similar_size = smaller_area / larger_area > 0.55
+    return similar_size and intersection / smaller_area > 0.55
 
 
 def _clamp_bbox(bbox: dict | None, image_width: int, image_height: int) -> dict | None:
@@ -994,10 +1086,10 @@ def _is_oversized_bbox(bbox: dict, image_width: int, image_height: int, area: st
         max_height_ratio = 0.5
         edge_area_ratio = 0.09
     elif area == "Windows":
-        max_area_ratio = 0.08
-        max_width_ratio = 0.42
-        max_height_ratio = 0.42
-        edge_area_ratio = 0.05
+        max_area_ratio = 0.16
+        max_width_ratio = 0.46
+        max_height_ratio = 0.82
+        edge_area_ratio = 0.08
     else:
         max_area_ratio = 0.06
         max_width_ratio = 0.35

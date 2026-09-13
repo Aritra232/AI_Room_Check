@@ -24,7 +24,7 @@ class AreaResult(BaseModel):
     name: InspectionArea
     visible: bool
     status: AreaStatus
-    confidence: int = Field(ge=0, le=100)
+    confidence: int | None = Field(default=None, ge=0, le=100)
     note: str
 
 
